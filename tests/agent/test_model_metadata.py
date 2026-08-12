@@ -379,12 +379,12 @@ class TestCodexOAuthContextLength:
         first_response = MagicMock()
         first_response.status_code = 200
         first_response.json.return_value = {
-            "models": [{"slug": "gpt-5.6-terra", "context_window": 272_000}]
+            "models": [{"slug": "gpt-5.5", "context_window": 272_000}]
         }
         second_response = MagicMock()
         second_response.status_code = 200
         second_response.json.return_value = {
-            "models": [{"slug": "gpt-5.6-terra", "context_window": 372_000}]
+            "models": [{"slug": "gpt-5.5", "context_window": 372_000}]
         }
 
         with patch(
@@ -392,19 +392,19 @@ class TestCodexOAuthContextLength:
             side_effect=[first_response, second_response],
         ) as mock_get, patch("agent.model_metadata.save_context_length") as mock_save:
             first = get_model_context_length(
-                "gpt-5.6-terra",
+                "gpt-5.5",
                 base_url="https://chatgpt.com/backend-api/codex",
                 api_key="token-account-a",
                 provider="openai-codex",
             )
             first_again = get_model_context_length(
-                "gpt-5.6-terra",
+                "gpt-5.5",
                 base_url="https://chatgpt.com/backend-api/codex",
                 api_key="token-account-a",
                 provider="openai-codex",
             )
             second = get_model_context_length(
-                "gpt-5.6-terra",
+                "gpt-5.5",
                 base_url="https://chatgpt.com/backend-api/codex",
                 api_key="token-account-b",
                 provider="openai-codex",
@@ -419,6 +419,41 @@ class TestCodexOAuthContextLength:
             "token-account" not in key
             for key in mm._codex_oauth_context_cache
         )
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gpt-5.6-sol",
+            "gpt-5.6-sol-pro",
+            "gpt-5.6-terra",
+            "gpt-5.6-terra-pro",
+            "gpt-5.6-luna",
+            "gpt-5.6-luna-pro",
+        ],
+    )
+    def test_gpt56_codex_models_are_fixed_at_272k_despite_live_metadata(self, model):
+        """Every GPT-5.6 Codex variant uses the enforced 272k backend cap,
+        even if the live model catalog advertises the direct-API window.
+        """
+        from agent.model_metadata import get_model_context_length
+
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.json.return_value = {
+            "models": [{"slug": model, "context_window": 1_050_000}]
+        }
+
+        with patch("agent.model_metadata.requests.get", return_value=fake_response), \
+             patch("agent.model_metadata.get_cached_context_length", return_value=None), \
+             patch("agent.model_metadata.save_context_length"):
+            ctx = get_model_context_length(
+                model=model,
+                base_url="https://chatgpt.com/backend-api/codex",
+                api_key="fake-token",
+                provider="openai-codex",
+            )
+
+        assert ctx == 272_000
 
     def test_probe_failure_falls_back_to_hardcoded(self):
         """If the probe fails (non-200 / network error), we still return
@@ -456,7 +491,7 @@ class TestCodexOAuthContextLength:
         monkeypatch.setattr(mm, "_get_context_cache_path", lambda: cache_file)
 
         base_url = "https://chatgpt.com/backend-api/codex"
-        stale_key = f"gpt-5.6-terra@{base_url}"
+        stale_key = f"gpt-5.5@{base_url}"
         other_key = "other-model@https://api.openai.com/v1/"
         import yaml as _yaml
         cache_file.write_text(_yaml.dump({"context_lengths": {
@@ -467,14 +502,14 @@ class TestCodexOAuthContextLength:
         fake_response = MagicMock()
         fake_response.status_code = 200
         fake_response.json.return_value = {
-            "models": [{"slug": "gpt-5.6-terra", "context_window": live_context}]
+            "models": [{"slug": "gpt-5.5", "context_window": live_context}]
         }
         # Exercise real persistence here: this test verifies that a live value
         # replaces the stale on-disk entry. Failure-path tests below mock the
         # writer because they assert that fallback values are not persisted.
         with patch("agent.model_metadata.requests.get", return_value=fake_response) as mock_get:
             ctx = mm.get_model_context_length(
-                model="gpt-5.6-terra",
+                model="gpt-5.5",
                 base_url=base_url,
                 api_key="fake-token",
                 provider="openai-codex",

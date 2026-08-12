@@ -2360,8 +2360,10 @@ def _resolve_codex_oauth_context_length_with_source(
 ) -> Tuple[Optional[int], str]:
     """Resolve a Codex OAuth model's real context window.
 
-    Prefers a live probe of chatgpt.com/backend-api/codex/models (when we
-    have a bearer token), then falls back to ``_CODEX_OAUTH_CONTEXT_FALLBACK``.
+    GPT-5.6 models use the backend's enforced 272K cap regardless of live
+    catalog metadata. Other models prefer a live probe of
+    chatgpt.com/backend-api/codex/models (when we have a bearer token), then
+    fall back to ``_CODEX_OAUTH_CONTEXT_FALLBACK``.
 
     Returns ``(context_length, source)`` where source is ``"live"`` for a
     value returned by a fresh authenticated endpoint probe, ``"memory"`` for
@@ -2372,19 +2374,25 @@ def _resolve_codex_oauth_context_length_with_source(
     if not model_bare:
         return None, ""
 
+    model_lower = model_bare.lower()
+    if (
+        model_lower == "gpt-5.6"
+        or model_lower.startswith("gpt-5.6-")
+        or model_lower.startswith("gpt-5.6.")
+    ):
+        return 272_000, "fallback"
+
     if access_token:
         live, fresh_probe = _fetch_codex_oauth_context_lengths_with_source(access_token)
         live_source = "live" if fresh_probe else "memory"
         if model_bare in live:
             return live[model_bare], live_source
         # Case-insensitive match in case casing drifts
-        model_lower = model_bare.lower()
         for slug, ctx in live.items():
             if slug.lower() == model_lower:
                 return ctx, live_source
 
     # Fallback: longest-key-first substring match over hardcoded defaults.
-    model_lower = model_bare.lower()
     for slug, ctx in sorted(
         _CODEX_OAUTH_CONTEXT_FALLBACK.items(), key=lambda x: len(x[0]), reverse=True
     ):
